@@ -40,7 +40,8 @@ export default function TransactionsClient() {
     
     console.log("[CLIENT] token1 (direct access):", token1 ? token1.substring(0, 50) + "..." : "undefined");
     console.log("[CLIENT] token2 (casted access):", token2 ? token2.substring(0, 50) + "..." : "undefined");
-    console.log("[CLIENT] Final token value:", token1 || token2 ? (token1 || token2).substring(0, 50) + "..." : "undefined");
+    const finalToken = token1 || token2;
+    console.log("[CLIENT] Final token value:", finalToken ? finalToken.substring(0, 50) + "..." : "undefined");
     
     const token = token1 || token2;
     
