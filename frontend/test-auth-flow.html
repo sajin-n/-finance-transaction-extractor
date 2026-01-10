@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Auth Flow Test</title>
+    <style>
+        body { font-family: monospace; padding: 20px; }
+        button { padding: 10px; margin: 5px; }
+        pre { background: #f0f0f0; padding: 10px; overflow-x: auto; }
+        .success { color: green; }
+        .error { color: red; }
+    </style>
+</head>
+<body>
+    <h1>Auth Flow Test</h1>
+    
+    <div>
+        <h2>Step 1: Login to Backend</h2>
+        <input type="email" id="email" placeholder="Email" value="test@example.com">
+        <input type="password" id="password" placeholder="Password" value="password123">
+        <button onclick="testLogin()">Login</button>
+        <pre id="login-result"></pre>
+    </div>
+    
+    <div>
+        <h2>Step 2: Test Token</h2>
+        <button onclick="testToken()">Validate Token</button>
+        <pre id="token-result"></pre>
+    </div>
+    
+    <div>
+        <h2>Step 3: Fetch Transactions</h2>
+        <button onclick="testFetch()">Fetch Transactions</button>
+        <pre id="fetch-result"></pre>
+    </div>
+    
+    <script>
+        let token = null;
+        
+        async function testLogin() {
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+            const result = document.getElementById('login-result');
+            
+            try {
+                const response = await fetch('http://localhost:3000/api/auth/custom-sign-in', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Origin': 'http://localhost:3001'
+                    },
+                    body: JSON.stringify({ email, password })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    token = data.token;
+                    result.innerHTML = `<span class="success">✓ Login successful!</span>\n` +
+                        `User: ${data.user.email}\n` +
+                        `Token: ${token.substring(0, 50)}...\n` +
+                        `Token length: ${token.length}`;
+                } else {
+                    result.innerHTML = `<span class="error">✗ Login failed: ${data.error}</span>`;
+                }
+            } catch (error) {
+                result.innerHTML = `<span class="error">✗ Error: ${error.message}</span>`;
+            }
+        }
+        
+        async function testToken() {
+            const result = document.getElementById('token-result');
+            
+            if (!token) {
+                result.innerHTML = '<span class="error">✗ No token. Please login first.</span>';
+                return;
+            }
+            
+            try {
+                const response = await fetch('http://localhost:3000/api/auth/debug-token', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    result.innerHTML = `<span class="success">✓ Token is valid!</span>\n` +
+                        JSON.stringify(data, null, 2);
+                } else {
+                    result.innerHTML = `<span class="error">✗ Token validation failed: ${data.error}</span>`;
+                }
+            } catch (error) {
+                result.innerHTML = `<span class="error">✗ Error: ${error.message}</span>`;
+            }
+        }
+        
+        async function testFetch() {
+            const result = document.getElementById('fetch-result');
+            
+            if (!token) {
+                result.innerHTML = '<span class="error">✗ No token. Please login first.</span>';
+                return;
+            }
+            
+            try {
+                const response = await fetch('http://localhost:3000/api/transactions', {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    result.innerHTML = `<span class="success">✓ Fetch successful!</span>\n` +
+                        JSON.stringify(data, null, 2);
+                } else {
+                    result.innerHTML = `<span class="error">✗ Fetch failed (${response.status}): ${JSON.stringify(data)}</span>`;
+                }
+            } catch (error) {
+                result.innerHTML = `<span class="error">✗ Error: ${error.message}</span>`;
+            }
+        }
+    </script>
+</body>
+</html>
