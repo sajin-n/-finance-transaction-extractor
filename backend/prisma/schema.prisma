@@ -15,18 +15,29 @@ model Organization {
 }
 
 model User {
-  id              String   @id @default(uuid())
-  email           String   @unique
-  passwordHash    String
-  organizationId  String
-  organization    Organization @relation(fields: [organizationId], references: [id])
-  createdAt       DateTime @default(now())
+  id              String       @id
+  email           String       @unique
+  emailVerified   Boolean      @default(false)
+  name            String?
+  image           String?
+  organizationId  String?
+  organization    Organization? @relation(fields: [organizationId], references: [id])
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  sessions        session[]
+  accounts        account[]
+  transactions    Transaction[]
+
+  @@index([organizationId])
 }
 
 model Transaction {
   id             String   @id @default(uuid())
   organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id])
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   date           DateTime
   description    String
   amount         Float
@@ -35,4 +46,53 @@ model Transaction {
   createdAt      DateTime @default(now())
 
   @@index([organizationId, createdAt])
+  @@index([userId, createdAt])
+}
+
+/// =======================
+/// Better Auth Models
+/// =======================
+
+model session {
+  id        String   @id
+  expiresAt DateTime
+  token     String   @unique
+  createdAt DateTime
+  updatedAt DateTime
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("session")
+}
+
+model account {
+  id                String   @id
+  accountId         String
+  providerId        String
+  userId            String
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken       String?
+  refreshToken      String?
+  idToken           String?
+  accessTokenExpiresAt DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope             String?
+  password          String?
+  createdAt         DateTime
+  updatedAt         DateTime
+
+  @@map("account")
+}
+
+model verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime
+  updatedAt  DateTime
+
+  @@map("verification")
 }
