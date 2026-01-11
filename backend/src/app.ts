@@ -14,7 +14,7 @@ app.use("*", logger());
 app.use("*", cors({
   origin: ["http://localhost:3001", "http://localhost:3000", "http://127.0.0.1:3001", "http://127.0.0.1:3000"],
   credentials: true,
-  allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowHeaders: ["Content-Type", "Authorization", "Cookie"],
   exposeHeaders: ["Set-Cookie", "Content-Type"],
   maxAge: 86400
@@ -68,12 +68,16 @@ app.post("/api/auth/custom-sign-in", async (c) => {
     });
 
     if (!user) {
+      console.log("[CUSTOM-SIGN-IN] User not found:", email);
       return c.json({ error: "Invalid credentials" }, 401);
     }
 
-    // Find password account
-    const passwordAccount = user.accounts.find(acc => acc.providerId === "email");
+    console.log("[CUSTOM-SIGN-IN] User found:", email, "Accounts:", user.accounts.map(a => ({ providerId: a.providerId, hasPassword: !!a.password })));
+
+    // Find password account - Better Auth uses "credential" as providerId
+    const passwordAccount = user.accounts.find(acc => acc.providerId === "credential" || acc.providerId === "email");
     if (!passwordAccount || !passwordAccount.password) {
+      console.log("[CUSTOM-SIGN-IN] No password account found. Available providers:", user.accounts.map(a => a.providerId));
       return c.json({ error: "Invalid credentials" }, 401);
     }
 

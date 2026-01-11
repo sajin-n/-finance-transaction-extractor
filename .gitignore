@@ -5,3 +5,34 @@ __pycache__/
 cookies.txt
 .DS_Store
 backend/nul
+
+# Node/Next.js
+node_modules/
+.next/
+.out/
+.turbo/
+.turbopack/
+.vercel/
+
+# Build/coverage
+dist/
+coverage/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# Env files
+.env*
+frontend/.env*
+backend/.env*
+!env.example
+
+# VS Code
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db

@@ -33,7 +33,14 @@ api.interceptors.response.use(
     return response;
   },
   (error) => {
-    console.error("[API] Error:", error.code, error.message, error.response?.status, error.response?.data);
+    console.error("[API] Error Code:", error.code);
+    console.error("[API] Error Message:", error.message);
+    console.error("[API] Response Status:", error.response?.status);
+    console.error("[API] Response Data:", error.response?.data);
+    console.error("[API] Full Error:", error);
+    if (error.code === "ERR_NETWORK") {
+      console.error("[API] NETWORK ERROR - Backend might not be running at", api.defaults.baseURL);
+    }
     return Promise.reject(error);
   }
 );
