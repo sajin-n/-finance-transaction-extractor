@@ -8,7 +8,7 @@
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
     "dev": "nodemon --signal SIGINT --watch src --exec ts-node src/server.ts",
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
     "start": "node dist/server.js"
   },
   "keywords": [],
@@ -37,5 +37,8 @@
     "ts-jest": "^29.4.6",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=18"
   }
 }
