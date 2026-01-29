@@ -5,6 +5,8 @@
     "dist",
     "**/*.test.ts",
     "**/*.spec.ts",
-    "**/__tests__/**"
+    "**/__tests__/**",
+    "**/test-setup.ts",
+    "**/*-setup.ts"
   ]
 }
