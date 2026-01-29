@@ -12,6 +12,9 @@ model Organization {
   name         String
   users        User[]
   transactions Transaction[]
+  auditLogs    AuditLog[]
+  bulkJobs     BulkJob[]
+  anomalyRules AnomalyRule[]
 }
 
 model User {
@@ -20,14 +23,18 @@ model User {
   emailVerified   Boolean      @default(false)
   name            String?
   image           String?
+  role            String       @default("user") // user, reviewer, admin
   organizationId  String?
   organization    Organization? @relation(fields: [organizationId], references: [id])
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
 
-  sessions        session[]
-  accounts        account[]
-  transactions    Transaction[]
+  sessions              session[]
+  accounts              account[]
+  transactions          Transaction[]
+  auditLogs             AuditLog[]
+  reviewsGiven          TransactionReview[] @relation("Reviewer")
+  transactionsCreated   Transaction[]       @relation("Creator")
 
   @@index([organizationId])
 }
@@ -38,16 +45,64 @@ model Transaction {
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   userId         String
   user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Core fields
   date           DateTime
   description    String
   amount         Float
   balance        Float?
+  currency       String   @default("USD")
+  baseCurrencyAmount Float? // Normalized amount in base currency
+  counterparty   String?  // Who the transaction is with
+  
+  // AI/ML Fields
   confidence     Float
+  overallConfidence Float? // Overall AI confidence score (0-100)
+  fieldConfidences Json?   // Per-field confidence scores
   category       String?  @default("Uncategorized")
-  status         String   @default("pending") // pending, verified, flagged
+  predictedCategory String? // AI-suggested category
+  
+  // Workflow fields
+  status         String   @default("pending") // pending, under_review, verified, flagged, rejected
+  workflowStage  String   @default("extracted") // extracted, reviewed, approved, finalized
+  
+  // Maker-Checker
+  createdById    String?
+  createdBy      User?    @relation("Creator", fields: [createdById], references: [id])
+  reviews        TransactionReview[]
+  reviewStatus   String   @default("none") // none, pending, approved, rejected, auto_approved
+  reviewRequestedAt DateTime?
+  reviewRequestedBy String?
+  reviewedAt     DateTime?
+  reviewedBy     String?
+  
+  // Anomaly Detection
+  isAnomaly      Boolean  @default(false)
+  anomalyScore   Float?
+  anomalyReasons String[]
+  
+  // Recurring Detection
+  isRecurring    Boolean  @default(false)
+  recurringGroupId String?
+  recurringPattern String? // weekly, monthly, quarterly, annual
+  
+  // PII Masking
+  hasPII         Boolean  @default(false)
+  maskedDescription String?
+  piiFields      String[] @default([])
+  
+  // Related Party
+  isRelatedParty Boolean  @default(false)
+  relatedPartyName String?
+  
+  // Metadata
   notes          String?
   tags           String[] @default([])
   rawText        String?
+  sourceFile     String?
+  bulkJobId      String?
+  bulkJob        BulkJob? @relation(fields: [bulkJobId], references: [id])
+  
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
@@ -55,6 +110,106 @@ model Transaction {
   @@index([userId, createdAt])
   @@index([category])
   @@index([status])
+  @@index([reviewStatus])
+  @@index([isAnomaly])
+  @@index([isRecurring])
+  @@index([recurringGroupId])
+  @@index([bulkJobId])
+}
+
+// Maker-Checker Review System
+model TransactionReview {
+  id            String   @id @default(uuid())
+  transactionId String
+  transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  reviewerId    String
+  reviewer      User     @relation("Reviewer", fields: [reviewerId], references: [id])
+  
+  action        String   // approve, reject, request_changes, pending, escalated
+  comment       String   @default("")
+  fieldChanges  Json?    // Changes made during review
+  
+  createdAt     DateTime @default(now())
+  
+  @@index([transactionId])
+  @@index([reviewerId])
+}
+
+// Audit Log for Compliance
+model AuditLog {
+  id             String   @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  userId         String?
+  user           User?    @relation(fields: [userId], references: [id])
+  
+  action         String   // create, update, delete, view, export, login, logout
+  entityType     String   // transaction, user, bulk_job, etc.
+  entityId       String?
+  
+  oldValues      Json?
+  newValues      Json?
+  metadata       Json?    // IP, user agent, etc.
+  
+  ipAddress      String?
+  userAgent      String?
+  
+  createdAt      DateTime @default(now())
+  
+  @@index([organizationId, createdAt])
+  @@index([userId])
+  @@index([entityType, entityId])
+  @@index([action])
+}
+
+// Bulk Processing Jobs
+model BulkJob {
+  id             String   @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  userId         String
+  jobType        String   @default("import") // import, export, process
+  
+  status         String   @default("pending") // pending, processing, completed, failed, cancelled
+  totalItems     Int      @default(0)
+  processedItems Int      @default(0)
+  successfulItems Int     @default(0)
+  failedItems    Int      @default(0)
+  
+  webhookUrl     String?
+  webhookSecret  String?
+  parentJobId    String?  // For retry jobs
+  
+  results        Json?    // Summary of results
+  errors         Json?    // Any errors encountered
+  
+  transactions   Transaction[]
+  
+  startedAt      DateTime?
+  completedAt    DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  
+  @@index([organizationId, status])
+}
+
+// Anomaly Detection Rules
+model AnomalyRule {
+  id             String   @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  
+  name           String
+  description    String?
+  isActive       Boolean  @default(true)
+  
+  ruleType       String   // threshold, pattern, statistical
+  conditions     Json     // Rule conditions
+  
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  
+  @@index([organizationId, isActive])
 }
 
 /// =======================

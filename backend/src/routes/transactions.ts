@@ -3,13 +3,134 @@ import type { Env } from "../types/env";
 import { prisma } from "../prisma";
 import { requireAuth } from "../auth/middleware";
 import { extractTransaction } from "../services/extractor";
+import { extractTransactionsWithAI, extractWithRegex } from "../services/ai-extractor";
+import { parseFile } from "../services/file-parser";
 import { calculateConfidence } from "../utils/confidence";
+import { detectAnomaliesBatch } from "../services/anomaly";
+import { createAuditLog } from "../services/audit";
 
 export const txRoutes = new Hono<Env>();
 
 /**
+ * POST /api/transactions/upload
+ * Protected – handles file upload (CSV, PDF, Excel, TXT)
+ */
+txRoutes.post("/upload", requireAuth, async (c) => {
+  try {
+    const formData = await c.req.formData();
+    const file = formData.get("file") as File;
+
+    if (!file) {
+      return c.json({ error: "No file uploaded" }, 400);
+    }
+
+    const { organizationId, userId } = c.get("auth");
+    const fileName = file.name.toLowerCase();
+    
+    console.log(`[Upload] Processing file: ${file.name} (${file.size} bytes)`);
+
+    // Use the new file parser for CSV, PDF, and text files
+    let parsedTransactions;
+    try {
+      parsedTransactions = await parseFile(file);
+      console.log(`[Upload] Parsed ${parsedTransactions.length} transactions from file`);
+    } catch (parseError) {
+      console.error("[Upload] File parsing failed:", parseError);
+      return c.json({ 
+        error: parseError instanceof Error ? parseError.message : "Failed to parse file",
+        hint: "Supported formats: CSV, PDF, TXT. For Excel files, please convert to CSV first."
+      }, 400);
+    }
+
+    if (parsedTransactions.length === 0) {
+      return c.json({ 
+        error: "No transactions found in file",
+        hint: "Ensure the file contains transaction data with dates, descriptions, and amounts."
+      }, 400);
+    }
+
+    const transactions = [];
+    
+    for (const parsed of parsedTransactions) {
+      try {
+        const tx = await prisma.transaction.create({
+          data: {
+            date: parsed.date,
+            description: parsed.description,
+            amount: parsed.amount,
+            category: parsed.category || categorizeTransaction(parsed.description),
+            counterparty: parsed.counterparty || null,
+            confidence: parsed.confidence,
+            overallConfidence: parsed.confidence,
+            organizationId,
+            userId,
+            sourceFile: file.name,
+            // Set proper initial status for maker-checker workflow
+            status: "pending",
+            reviewStatus: "pending",
+            reviewRequestedAt: new Date(),
+            reviewRequestedBy: userId
+          }
+        });
+        
+        transactions.push(tx);
+        
+        // Create audit log for each transaction
+        await createAuditLog({
+          userId,
+          organizationId,
+          action: "create",
+          entityType: "transaction",
+          entityId: tx.id,
+          newValues: {
+            description: tx.description,
+            amount: tx.amount,
+            date: tx.date,
+            category: tx.category
+          },
+          metadata: { source: "file_upload", fileName: file.name }
+        });
+      } catch (err) {
+        console.error("Failed to save transaction:", parsed, err);
+        // Continue with next transaction
+      }
+    }
+
+    // Run anomaly detection on uploaded transactions (async, don't wait)
+    if (transactions.length > 0) {
+      console.log(`[Upload] Running anomaly detection on ${transactions.length} transactions`);
+      detectAnomaliesBatch(
+        transactions.map(tx => ({
+          id: tx.id,
+          amount: tx.amount,
+          description: tx.description,
+          category: tx.category || undefined,
+          date: tx.date
+        })),
+        organizationId
+      ).then(results => {
+        const anomalyCount = Array.from(results.values()).filter(r => r.isAnomaly).length;
+        console.log(`[Upload] Anomaly detection complete: ${anomalyCount} anomalies found`);
+      }).catch(err => {
+        console.error("[Upload] Anomaly detection failed:", err);
+      });
+    }
+
+    return c.json({ 
+      success: true,
+      count: transactions.length,
+      transactions 
+    }, 201);
+    
+  } catch (err) {
+    console.error("Upload error:", err);
+    return c.json({ error: "Failed to process file" }, 500);
+  }
+});
+
+/**
  * POST /api/transactions/extract
- * Protected – parses raw text and stores transaction
+ * Protected – parses raw text (single or multi-line) using AI and stores transactions
  */
 txRoutes.post("/extract", requireAuth, async (c) => {
   // 1. Safely parse body
@@ -23,27 +144,98 @@ txRoutes.post("/extract", requireAuth, async (c) => {
   }
 
   const { organizationId, userId } = c.get("auth");
+  const useAI = body.useAI !== false; // Default to using AI
 
-  // 2. Extract transaction safely
-  const parsed = extractTransaction(body.text);
-  const confidence = calculateConfidence(body.text);
-
-  // 3. Auto-categorize based on description
-  const category = categorizeTransaction(parsed.description);
-
-  // 4. Persist transaction scoped to organization AND user
-  const tx = await prisma.transaction.create({
-    data: {
-      ...parsed,
-      confidence,
-      category,
-      rawText: body.text,
-      organizationId,
-      userId
+  try {
+    // 2. Extract transactions using AI or regex
+    let extractedTransactions;
+    if (useAI) {
+      console.log("[Extract] Using AI extraction for multi-line text");
+      extractedTransactions = await extractTransactionsWithAI(body.text);
+    } else {
+      console.log("[Extract] Using regex extraction");
+      extractedTransactions = extractWithRegex(body.text);
     }
-  });
 
-  return c.json(tx, 201);
+    if (extractedTransactions.length === 0) {
+      return c.json({ 
+        error: "No transactions could be extracted from the provided text",
+        hint: "Make sure each line contains a date, description, and amount"
+      }, 400);
+    }
+
+    // 3. Save all extracted transactions
+    const savedTransactions = [];
+    for (const parsed of extractedTransactions) {
+      const tx = await prisma.transaction.create({
+        data: {
+          date: parsed.date,
+          description: parsed.description,
+          amount: parsed.amount,
+          category: parsed.category || categorizeTransaction(parsed.description),
+          counterparty: parsed.counterparty || null,
+          confidence: parsed.confidence, // Required field
+          overallConfidence: parsed.confidence, // Optional field
+          rawText: body.text.substring(0, 500), // Store first 500 chars of raw input
+          organizationId,
+          userId,
+          // Set proper initial status for maker-checker workflow
+          status: "pending",
+          reviewStatus: "pending",
+          reviewRequestedAt: new Date(),
+          reviewRequestedBy: userId
+        }
+      });
+      savedTransactions.push(tx);
+      
+      // Create audit log for each transaction
+      await createAuditLog({
+        userId,
+        organizationId,
+        action: "create",
+        entityType: "transaction",
+        entityId: tx.id,
+        newValues: {
+          description: tx.description,
+          amount: tx.amount,
+          date: tx.date,
+          category: tx.category
+        },
+        metadata: { source: "paste_extract", aiUsed: useAI }
+      });
+    }
+
+    // 4. Run anomaly detection on new transactions (async, don't wait)
+    if (savedTransactions.length > 0) {
+      console.log(`[Extract] Running anomaly detection on ${savedTransactions.length} transactions`);
+      detectAnomaliesBatch(
+        savedTransactions.map(tx => ({
+          id: tx.id,
+          amount: tx.amount,
+          description: tx.description,
+          category: tx.category || undefined,
+          date: tx.date
+        })),
+        organizationId
+      ).then(results => {
+        const anomalyCount = Array.from(results.values()).filter(r => r.isAnomaly).length;
+        console.log(`[Extract] Anomaly detection complete: ${anomalyCount} anomalies found`);
+      }).catch(err => {
+        console.error("[Extract] Anomaly detection failed:", err);
+      });
+    }
+
+    return c.json({
+      success: true,
+      count: savedTransactions.length,
+      transactions: savedTransactions,
+      aiUsed: useAI
+    }, 201);
+
+  } catch (error) {
+    console.error("[Extract] Error:", error);
+    return c.json({ error: "Failed to extract transactions" }, 500);
+  }
 });
 
 /**
@@ -242,6 +434,37 @@ txRoutes.patch("/:id", requireAuth, async (c) => {
 });
 
 /**
+ * DELETE /api/transactions/all
+ * Protected – delete ALL transactions for the organization
+ * NOTE: Must be defined BEFORE /:id route to avoid "all" being matched as an id
+ */
+txRoutes.delete("/all", requireAuth, async (c) => {
+  const { organizationId, userId } = c.get("auth");
+
+  const result = await prisma.transaction.deleteMany({
+    where: { organizationId }
+  });
+
+  // Audit log for bulk delete
+  await createAuditLog({
+    userId,
+    organizationId,
+    action: "delete",
+    entityType: "transaction",
+    metadata: { 
+      action: "delete_all",
+      count: result.count
+    }
+  });
+
+  return c.json({ 
+    success: true, 
+    deleted: result.count,
+    message: `Deleted all ${result.count} transaction(s)` 
+  });
+});
+
+/**
  * DELETE /api/transactions/:id
  * Protected – delete a single transaction
  */
@@ -270,7 +493,7 @@ txRoutes.delete("/:id", requireAuth, async (c) => {
  * Protected – delete multiple transactions
  */
 txRoutes.post("/bulk-delete", requireAuth, async (c) => {
-  const { organizationId } = c.get("auth");
+  const { organizationId, userId } = c.get("auth");
   const body = await c.req.json().catch(() => null);
 
   if (!body || !Array.isArray(body.ids) || body.ids.length === 0) {
@@ -281,6 +504,19 @@ txRoutes.post("/bulk-delete", requireAuth, async (c) => {
     where: {
       id: { in: body.ids },
       organizationId
+    }
+  });
+
+  // Audit log for bulk delete
+  await createAuditLog({
+    userId,
+    organizationId,
+    action: "delete",
+    entityType: "transaction",
+    metadata: { 
+      action: "bulk_delete",
+      ids: body.ids,
+      count: result.count 
     }
   });
 

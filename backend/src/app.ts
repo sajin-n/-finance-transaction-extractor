@@ -3,6 +3,11 @@ import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { auth } from "./auth/better-auth";
 import { txRoutes } from "./routes/transactions";
+import { auditRoutes } from "./routes/audit";
+import { anomalyRoutes } from "./routes/anomalies";
+import { bulkRoutes } from "./routes/bulk";
+import { nlqRoutes } from "./routes/nlq";
+import { reviewRoutes } from "./routes/reviews";
 import { prisma } from "./prisma";
 import { verifyPassword } from "better-auth/crypto";
 import * as jwt from "jsonwebtoken";
@@ -138,4 +143,8 @@ app.on(["GET", "POST", "PUT", "DELETE", "PATCH"], "/api/auth/*", async (c) => {
 
 // Routes
 app.route("/api/transactions", txRoutes);
-
+app.route("/api/audit", auditRoutes);
+app.route("/api/anomalies", anomalyRoutes);
+app.route("/api/bulk", bulkRoutes);
+app.route("/api/nlq", nlqRoutes);
+app.route("/api/reviews", reviewRoutes);

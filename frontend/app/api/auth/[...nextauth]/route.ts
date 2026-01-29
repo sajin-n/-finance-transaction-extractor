@@ -35,20 +35,18 @@ const handler = NextAuth({
       async authorize(credentials) {
         try {
           console.log("[AUTH] authorize called with email:", credentials?.email);
-          const res = await fetch(
-            "http://localhost:3000/api/auth/custom-sign-in",
-            {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                "Origin": "http://localhost:3001"
-              },
-              body: JSON.stringify({
-                email: credentials?.email,
-                password: credentials?.password
-              })
-            }
-          );
+          // Call backend custom sign-in endpoint. Use NEXT_PUBLIC_API_URL if configured
+          const backendBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+          const res = await fetch(`${backendBase}/api/auth/custom-sign-in`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+              email: credentials?.email,
+              password: credentials?.password
+            })
+          });
 
           if (!res.ok) {
             const text = await res.text();

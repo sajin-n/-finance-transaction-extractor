@@ -9,14 +9,57 @@ import { Input } from "@/components/ui/input";
 export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [diagnostic, setDiagnostic] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    await signIn("credentials", {
+    setError("");
+    setDiagnostic(null);
+    setLoading(true);
+
+    // Use redirect: false to capture errors and show diagnostics
+    const res = await signIn("credentials", {
+      redirect: false,
       email,
       password,
       callbackUrl: "/"
-    });
+    } as any);
+
+    setLoading(false);
+
+    // On success, redirect to the callback URL (dashboard/home)
+    if (res?.ok && !res?.error) {
+      window.location.href = res.url || "/";
+      return;
+    }
+
+    if (res?.error) {
+      setError(res.error as string);
+      // Run a diagnostic call to backend to surface HTTP status and body
+      try {
+        const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+        const diagRes = await fetch(`${apiBase}/api/auth/custom-sign-in`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password })
+        });
+
+        let bodyText: string | null = null;
+        const ct = diagRes.headers.get("content-type") || "";
+        if (ct.includes("application/json")) {
+          const json = await diagRes.json().catch(() => null);
+          bodyText = json ? JSON.stringify(json) : null;
+        } else {
+          bodyText = await diagRes.text().catch(() => null);
+        }
+
+        setDiagnostic(`Backend diagnostic: ${diagRes.status} ${diagRes.statusText}${bodyText ? ` — ${bodyText}` : ""}`);
+      } catch (diagErr: any) {
+        setDiagnostic(`Diagnostic error: ${diagErr?.message || diagErr}`);
+      }
+    }
   };
 
   return (
@@ -59,9 +102,16 @@ export default function LoginPage() {
             </div>
           </div>
 
-          <Button className="w-full py-3 text-base font-semibold">
-            Sign in
+          <Button className="w-full py-3 text-base font-semibold" disabled={loading}>
+            {loading ? "Signing in…" : "Sign in"}
           </Button>
+
+          {error && (
+            <div className="bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded-lg text-sm">
+              <div className="font-semibold">Sign in failed: {error}</div>
+              {diagnostic && <div className="mt-2 text-xs">{diagnostic}</div>}
+            </div>
+          )}
 
           <p className="text-center text-sm text-gray-600">
             {"Don't have an account? "}

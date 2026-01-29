@@ -19,24 +19,39 @@ export default function SignupPage() {
     setLoading(true);
 
     try {
-      const res = await fetch("http://localhost:3000/api/auth/sign-up/email", {
+      // Send request to backend API. Use NEXT_PUBLIC_API_URL when available
+      const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+      const res = await fetch(`${apiBase}/api/auth/sign-up/email`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name, email, password })
       });
 
-      // Parse response safely
-      let data;
-      try {
-        data = await res.json();
-      } catch {
-        setError(`Server error: ${res.status} ${res.statusText}`);
-        console.error("Failed to parse response:", res.statusText);
+      // Parse response safely depending on Content-Type
+      const contentType = res.headers.get("content-type") || "";
+      let data: any = null;
+      let text: string | null = null;
+
+      if (contentType.includes("application/json")) {
+        try {
+          data = await res.json();
+        } catch (parseErr) {
+          // JSON parsing failed even though header claims JSON
+          text = await res.text().catch(() => null);
+          setError(`Server error: ${res.status} ${res.statusText}${text ? ` - ${text}` : ""}`);
+          console.error("Failed to parse JSON response:", parseErr, "raw:", text);
+          return;
+        }
+      } else {
+        // Non-JSON response (could be plain text like "Bad Request")
+        text = await res.text().catch(() => null);
+        setError(`Server error: ${res.status} ${res.statusText}${text ? ` - ${text}` : ""}`);
+        console.error("Failed to parse non-JSON response:", text || res.statusText);
         return;
       }
 
       if (!res.ok) {
-        setError(data.message || data.error || "Signup failed");
+        setError(data?.message || data?.error || "Signup failed");
         return;
       }
 

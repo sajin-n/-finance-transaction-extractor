@@ -5,13 +5,37 @@ export type Transaction = {
   amount: number;
   balance?: number;
   confidence: number;
+  overallConfidence?: number;
   category?: string;
+  counterparty?: string;
   status: string;
   notes?: string;
   tags?: string[];
   rawText?: string;
   createdAt: string;
   updatedAt?: string;
+  
+  // Maker-Checker / Review fields
+  reviewStatus?: "none" | "pending" | "approved" | "rejected" | "auto_approved";
+  reviewRequestedAt?: string;
+  reviewedAt?: string;
+  
+  // Anomaly Detection
+  isAnomaly?: boolean;
+  anomalyScore?: number;
+  anomalyReasons?: string[];
+  
+  // Recurring Detection
+  isRecurring?: boolean;
+  recurringPattern?: string;
+  
+  // PII Detection
+  hasPII?: boolean;
+  maskedDescription?: string;
+  
+  // Related Party
+  isRelatedParty?: boolean;
+  relatedPartyName?: string;
 };
 
 export type TransactionsResponse = {
