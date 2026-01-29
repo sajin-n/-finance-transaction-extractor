@@ -14,10 +14,29 @@ import * as jwt from "jsonwebtoken";
 
 export const app = new Hono();
 
+// CORS origins - include production URLs
+const allowedOrigins = [
+  "http://localhost:3001", 
+  "http://localhost:3000", 
+  "http://127.0.0.1:3001", 
+  "http://127.0.0.1:3000",
+  // Production URLs
+  "https://finance-transaction-extractor.vercel.app",
+  process.env.FRONTEND_URL,
+].filter(Boolean) as string[];
+
+// Also allow any vercel.app subdomain
+const isAllowedOrigin = (origin: string | undefined): boolean => {
+  if (!origin) return false;
+  if (allowedOrigins.includes(origin)) return true;
+  if (origin.endsWith('.vercel.app')) return true;
+  return false;
+};
+
 // Middleware
 app.use("*", logger());
 app.use("*", cors({
-  origin: ["http://localhost:3001", "http://localhost:3000", "http://127.0.0.1:3001", "http://127.0.0.1:3000"],
+  origin: (origin) => isAllowedOrigin(origin) ? origin : allowedOrigins[0],
   credentials: true,
   allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowHeaders: ["Content-Type", "Authorization", "Cookie"],
