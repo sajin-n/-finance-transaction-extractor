@@ -19,6 +19,8 @@
   "dependencies": {
     "@hono/node-server": "^1.19.7",
     "@prisma/client": "^5.22.0",
+    "@types/jsonwebtoken": "^9.0.7",
+    "@types/node": "^22.10.5",
     "bcrypt": "^6.0.0",
     "better-auth": "^1.4.10",
     "csv-parse": "^6.1.0",
@@ -28,20 +30,18 @@
     "ollama": "^0.6.3",
     "pdf-parse": "^2.4.5",
     "prisma": "^5.22.0",
+    "typescript": "^5.9.3",
     "zod": "^3.24.1"
   },
   "devDependencies": {
     "@jest/globals": "^29.7.0",
     "@types/bcrypt": "^5.0.2",
     "@types/jest": "^29.5.14",
-    "@types/jsonwebtoken": "^9.0.7",
-    "@types/node": "^22.10.5",
     "@types/pdf-parse": "^1.1.5",
     "jest": "^29.7.0",
     "nodemon": "^3.1.11",
     "ts-jest": "^29.4.6",
-    "ts-node": "^10.9.2",
-    "typescript": "^5.9.3"
+    "ts-node": "^10.9.2"
   },
   "engines": {
     "node": ">=18"
