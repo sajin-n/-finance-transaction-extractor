@@ -2,12 +2,16 @@ import { Hono } from "hono";
 import type { Env } from "../types/env";
 import { prisma } from "../prisma";
 import { requireAuth } from "../auth/middleware";
-import { extractTransaction } from "../services/extractor";
 import { extractTransactionsWithAI, extractWithRegex } from "../services/ai-extractor";
 import { parseFile } from "../services/file-parser";
 import { calculateConfidence } from "../utils/confidence";
 import { detectAnomaliesBatch } from "../services/anomaly";
 import { createAuditLog } from "../services/audit";
+import {
+  detectRecurringPayment,
+  getRecurringGroups,
+  getCashFlowProjection
+} from "../services/recurring";
 
 export const txRoutes = new Hono<Env>();
 
@@ -72,8 +76,10 @@ txRoutes.post("/upload", requireAuth, async (c) => {
             reviewRequestedBy: userId
           }
         });
+
+        const recurringUpdatedTx = await applyRecurringDetectionToTransaction(tx.id, organizationId);
         
-        transactions.push(tx);
+        transactions.push(recurringUpdatedTx ?? tx);
         
         // Create audit log for each transaction
         await createAuditLog({
@@ -145,16 +151,22 @@ txRoutes.post("/extract", requireAuth, async (c) => {
 
   const { organizationId, userId } = c.get("auth");
   const useAI = body.useAI !== false; // Default to using AI
+  // Auto-detect mode unless explicitly provided:
+  // - true  => treat as single receipt/bill
+  // - false => treat as multi-transaction list/statement
+  const singleTransactionMode = typeof body.singleTransactionMode === "boolean"
+    ? body.singleTransactionMode
+    : !looksLikeMultiTransactionInput(body.text);
 
   try {
     // 2. Extract transactions using AI or regex
     let extractedTransactions;
     if (useAI) {
       console.log("[Extract] Using AI extraction for multi-line text");
-      extractedTransactions = await extractTransactionsWithAI(body.text);
+      extractedTransactions = await extractTransactionsWithAI(body.text, { singleTransactionMode });
     } else {
       console.log("[Extract] Using regex extraction");
-      extractedTransactions = extractWithRegex(body.text);
+      extractedTransactions = extractWithRegex(body.text, { singleTransactionMode });
     }
 
     if (extractedTransactions.length === 0) {
@@ -186,7 +198,9 @@ txRoutes.post("/extract", requireAuth, async (c) => {
           reviewRequestedBy: userId
         }
       });
-      savedTransactions.push(tx);
+
+      const recurringUpdatedTx = await applyRecurringDetectionToTransaction(tx.id, organizationId);
+      savedTransactions.push(recurringUpdatedTx ?? tx);
       
       // Create audit log for each transaction
       await createAuditLog({
@@ -237,6 +251,24 @@ txRoutes.post("/extract", requireAuth, async (c) => {
     return c.json({ error: "Failed to extract transactions" }, 500);
   }
 });
+
+function looksLikeMultiTransactionInput(text: string): boolean {
+  const lines = text
+    .split(/\r?\n/)
+    .map(l => l.trim())
+    .filter(Boolean);
+
+  if (lines.length < 2) {
+    return false;
+  }
+
+  // Count lines that look like: date + description + amount
+  const transactionLikeLineRegex = /^(\d{4}-\d{2}-\d{2}|\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}|\d{1,2}\s+[A-Za-z]{3,9}\s+\d{2,4}).*([+-]?\s*[₹$€£]?\s*\d[\d,]*\.?\d{0,2})\s*$/;
+  const matchedLines = lines.filter(line => transactionLikeLineRegex.test(line)).length;
+
+  // If multiple lines strongly resemble individual transactions, treat as multi input.
+  return matchedLines >= 2;
+}
 
 /**
  * GET /api/transactions
@@ -351,6 +383,43 @@ txRoutes.get("/stats", requireAuth, async (c) => {
     },
     byCategory,
     byStatus
+  });
+});
+
+/**
+ * GET /api/transactions/recurring/summary
+ * Protected – recurring groups and cash-flow projection
+ */
+txRoutes.get("/recurring/summary", requireAuth, async (c) => {
+  const { organizationId } = c.get("auth");
+  const months = Math.max(1, Math.min(12, parseInt(c.req.query("months") || "3", 10)));
+
+  const [groups, projection] = await Promise.all([
+    getRecurringGroups(organizationId),
+    getCashFlowProjection(organizationId, months)
+  ]);
+
+  const upcoming30Days = new Date();
+  upcoming30Days.setDate(upcoming30Days.getDate() + 30);
+
+  const upcomingExpenses30d = projection.projectedExpenses
+    .filter(p => p.date <= upcoming30Days)
+    .reduce((sum, p) => sum + Math.abs(p.amount), 0);
+
+  const upcomingIncome30d = projection.projectedIncome
+    .filter(p => p.date <= upcoming30Days)
+    .reduce((sum, p) => sum + p.amount, 0);
+
+  return c.json({
+    months,
+    recurringGroupCount: groups.length,
+    groups,
+    projection,
+    upcoming30d: {
+      projectedExpenses: upcomingExpenses30d,
+      projectedIncome: upcomingIncome30d,
+      projectedNet: upcomingIncome30d - upcomingExpenses30d
+    }
   });
 });
 
@@ -565,4 +634,47 @@ function categorizeTransaction(description: string): string {
   }
   
   return "Uncategorized";
+}
+
+async function applyRecurringDetectionToTransaction(transactionId: string, organizationId: string) {
+  const tx = await prisma.transaction.findUnique({
+    where: { id: transactionId },
+    select: {
+      id: true,
+      amount: true,
+      description: true,
+      date: true
+    }
+  });
+
+  if (!tx) return null;
+
+  const recurring = await detectRecurringPayment(
+    {
+      amount: tx.amount,
+      description: tx.description,
+      date: tx.date
+    },
+    organizationId
+  );
+
+  if (!recurring.isRecurring || !recurring.groupId || !recurring.pattern) {
+    return prisma.transaction.findUnique({ where: { id: transactionId } });
+  }
+
+  const idsToUpdate = Array.from(new Set([transactionId, ...recurring.matchingTransactions]));
+
+  await prisma.transaction.updateMany({
+    where: {
+      id: { in: idsToUpdate },
+      organizationId
+    },
+    data: {
+      isRecurring: true,
+      recurringGroupId: recurring.groupId,
+      recurringPattern: recurring.pattern
+    }
+  });
+
+  return prisma.transaction.findUnique({ where: { id: transactionId } });
 }
