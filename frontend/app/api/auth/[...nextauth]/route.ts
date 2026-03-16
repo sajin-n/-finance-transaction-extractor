@@ -7,6 +7,12 @@ interface CustomUser {
   token: string;
 }
 
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_URL ||
+  (process.env.NODE_ENV === "production"
+    ? "https://finance-transaction-extractor.onrender.com"
+    : "http://localhost:3001");
+
 // Extend NextAuth types
 declare module "next-auth" {
   interface Session extends DefaultSession {
@@ -36,8 +42,7 @@ const handler = NextAuth({
         try {
           console.log("[AUTH] authorize called with email:", credentials?.email);
           // Call backend custom sign-in endpoint. Use NEXT_PUBLIC_API_URL if configured
-          const backendBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
-          const res = await fetch(`${backendBase}/api/auth/custom-sign-in`, {
+          const res = await fetch(`${API_BASE_URL}/api/auth/custom-sign-in`, {
             method: "POST",
             headers: {
               "Content-Type": "application/json"
