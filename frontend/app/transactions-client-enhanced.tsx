@@ -29,6 +29,12 @@ const CATEGORIES = [
 
 const STATUSES = ["all", "pending", "verified", "flagged"];
 
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_URL ||
+  (process.env.NODE_ENV === "production"
+    ? "https://finance-transaction-extractor.onrender.com"
+    : "http://localhost:3001");
+
 export default function TransactionsClientEnhanced() {
   const { data: session } = useSession();
   const [text, setText] = useState("");
@@ -167,7 +173,7 @@ export default function TransactionsClientEnhanced() {
   async function handleExport() {
     try {
       const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/api/transactions/export`,
+        `${API_BASE_URL}/api/transactions/export`,
         {
           headers: {
             Authorization: `Bearer ${session?.accessToken}`

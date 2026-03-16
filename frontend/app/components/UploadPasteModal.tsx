@@ -17,6 +17,12 @@ interface UploadPasteModalProps {
   accessToken?: string;
 }
 
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_URL ||
+  (process.env.NODE_ENV === "production"
+    ? "https://finance-transaction-extractor.onrender.com"
+    : "http://localhost:3001");
+
 export default function UploadPasteModal({ onClose, onUploadSuccess, accessToken }: UploadPasteModalProps) {
   const [mode, setMode] = useState<"upload" | "paste">("upload");
   const [text, setText] = useState("");
@@ -37,7 +43,7 @@ export default function UploadPasteModal({ onClose, onUploadSuccess, accessToken
 
     try {
       const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001"}/api/transactions/upload`,
+        `${API_BASE_URL}/api/transactions/upload`,
         {
           method: "POST",
           headers: {
@@ -79,7 +85,7 @@ export default function UploadPasteModal({ onClose, onUploadSuccess, accessToken
 
     try {
       const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001"}/api/transactions/extract`,
+        `${API_BASE_URL}/api/transactions/extract`,
         {
           method: "POST",
           headers: {
