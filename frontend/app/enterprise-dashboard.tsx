@@ -34,6 +34,7 @@ import MakerCheckerPanel from "./components/MakerCheckerPanel";
 import AuditLogViewer from "./components/AuditLogViewer";
 import ExportPanel from "./components/ExportPanel";
 import UploadPasteModal from "./components/UploadPasteModal";
+import RecurringInsightsPanel from "./components/RecurringInsightsPanel";
 
 interface Transaction {
   id: string;
@@ -63,7 +64,7 @@ interface DashboardStats {
   recurringCount: number;
 }
 
-type ActivePanel = "nlq" | "anomalies" | "reviews" | "audit" | "export" | null;
+type ActivePanel = "nlq" | "anomalies" | "reviews" | "audit" | "export" | "recurring" | null;
 
 export default function EnterpriseDashboard() {
   const { data: session, status } = useSession();
@@ -280,8 +281,8 @@ export default function EnterpriseDashboard() {
                 </div>
                 {/* Hover Tooltip */}
                 <div className="absolute right-0 top-full mt-2 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
-                  <div className="bg-gray-900 text-white rounded-lg shadow-lg px-4 py-3 min-w-[200px]">
-                    <div className="absolute -top-2 right-4 w-0 h-0 border-l-[8px] border-l-transparent border-r-[8px] border-r-transparent border-b-[8px] border-b-gray-900"></div>
+                  <div className="bg-gray-900 text-white rounded-lg shadow-lg px-4 py-3 min-w-50">
+                    <div className="absolute -top-2 right-4 w-0 h-0 border-l-8 border-l-transparent border-r-8 border-r-transparent border-b-8 border-b-gray-900"></div>
                     <p className="font-medium text-sm">{session?.user?.name || "User"}</p>
                     <p className="text-xs text-gray-400 mt-0.5">{session?.user?.email}</p>
                   </div>
@@ -447,6 +448,15 @@ export default function EnterpriseDashboard() {
               <Button
                 variant="outline"
                 size="sm"
+                onClick={() => setActivePanel(activePanel === "recurring" ? null : "recurring")}
+                className={`gap-1 sm:gap-2 text-xs sm:text-sm h-8 sm:h-9 px-2 sm:px-3 ${activePanel === "recurring" ? "bg-purple-50 border-purple-300" : ""}`}
+              >
+                <Repeat className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-purple-600" />
+                <span className="hidden sm:inline">Recurring</span>
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
                 onClick={() => setActivePanel(activePanel === "nlq" ? null : "nlq")}
                 className={`gap-1 sm:gap-2 text-xs sm:text-sm h-8 sm:h-9 px-2 sm:px-3 ${activePanel === "nlq" ? "bg-purple-50 border-purple-300" : ""}`}
               >
@@ -502,6 +512,12 @@ export default function EnterpriseDashboard() {
             />
           </div>
         )}
+
+        {activePanel === "recurring" && (
+          <div className="mb-8">
+            <RecurringInsightsPanel />
+          </div>
+        )}
         
         {activePanel === "nlq" && (
           <div className="mb-8">
@@ -543,7 +559,7 @@ export default function EnterpriseDashboard() {
               >
                 <div className="flex justify-between items-start mb-2">
                   {selectionMode && (
-                    <div className="mr-3 flex-shrink-0">
+                    <div className="mr-3 shrink-0">
                       {selectedIds.has(t.id) ? (
                         <CheckSquare className="w-5 h-5 text-indigo-600" />
                       ) : (
@@ -637,7 +653,7 @@ export default function EnterpriseDashboard() {
                       {new Date(t.date).toLocaleDateString()}
                     </td>
                     <td className="px-4 lg:px-6 py-3 lg:py-4">
-                      <div className="text-sm text-gray-900 max-w-[200px] lg:max-w-none truncate lg:whitespace-normal" title={getDisplayDescription(t)}>
+                      <div className="text-sm text-gray-900 max-w-50 lg:max-w-none truncate lg:whitespace-normal" title={getDisplayDescription(t)}>
                         {getDisplayDescription(t)}
                       </div>
                       {t.counterparty && (
