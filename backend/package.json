@@ -10,6 +10,7 @@
     "dev": "nodemon --signal SIGINT --watch src --exec ts-node src/server.ts",
     "build": "NODE_OPTIONS='--max-old-space-size=512' npx prisma generate && tsc -p tsconfig.build.json",
     "start": "node dist/server.js",
+    "start:render": "npx prisma migrate deploy && node dist/server.js",
     "postinstall": "npx prisma generate || true"
   },
   "keywords": [],
