@@ -1,6 +1,7 @@
 import "dotenv/config";
 import { serve } from "@hono/node-server";
 import { app } from "./app";
+import { validateGroqConfiguration } from "./services/ai-extractor";
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
 const HOST = "0.0.0.0"; // Required for Render and other cloud platforms
@@ -8,6 +9,9 @@ const HOST = "0.0.0.0"; // Required for Render and other cloud platforms
 // Log environment
 console.log("[SERVER] BETTER_AUTH_SECRET set:", !!process.env.BETTER_AUTH_SECRET);
 console.log("[SERVER] BETTER_AUTH_SECRET length:", process.env.BETTER_AUTH_SECRET?.length || 0);
+
+// Non-blocking AI config validation
+void validateGroqConfiguration();
 
 serve({
   fetch: app.fetch,
