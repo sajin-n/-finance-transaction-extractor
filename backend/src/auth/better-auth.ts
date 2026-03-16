@@ -7,6 +7,15 @@ console.log("[BETTER-AUTH] Initializing...");
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
 const defaultBaseURL = `http://localhost:${PORT}`;
 const resolvedBaseURL = process.env.BETTER_AUTH_URL || defaultBaseURL;
+const trustedOrigins = [
+  "http://localhost:3000",
+  "http://localhost:3001",
+  "http://127.0.0.1:3000",
+  "http://127.0.0.1:3001",
+  "https://finance-transaction-extractor.vercel.app",
+  process.env.FRONTEND_URL,
+  process.env.NEXTAUTH_URL,
+].filter(Boolean) as string[];
 
 export const auth = betterAuth({
   baseURL: resolvedBaseURL,
@@ -24,14 +33,9 @@ export const auth = betterAuth({
   advanced: {
     disableCSRFCheck: true,
     disableOriginCheck: true,
-    useSecureCookies: false
+    useSecureCookies: process.env.NODE_ENV === "production"
   },
-  trustedOrigins: [
-    "http://localhost:3000",
-    "http://localhost:3001",
-    "http://127.0.0.1:3000",
-    "http://127.0.0.1:3001"
-  ]
+  trustedOrigins
 });
 
 console.log(`[BETTER-AUTH] Initialized successfully with baseURL=${resolvedBaseURL}`);
