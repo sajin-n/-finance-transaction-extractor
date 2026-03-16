@@ -6,6 +6,12 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_URL ||
+  (process.env.NODE_ENV === "production"
+    ? "https://finance-transaction-extractor.onrender.com"
+    : "http://localhost:3001");
+
 export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -39,8 +45,7 @@ export default function LoginPage() {
       setError(res.error as string);
       // Run a diagnostic call to backend to surface HTTP status and body
       try {
-        const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
-        const diagRes = await fetch(`${apiBase}/api/auth/custom-sign-in`, {
+        const diagRes = await fetch(`${API_BASE_URL}/api/auth/custom-sign-in`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ email, password })

@@ -5,6 +5,12 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_URL ||
+  (process.env.NODE_ENV === "production"
+    ? "https://finance-transaction-extractor.onrender.com"
+    : "http://localhost:3001");
+
 export default function SignupPage() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -20,8 +26,7 @@ export default function SignupPage() {
 
     try {
       // Send request to backend API. Use NEXT_PUBLIC_API_URL when available
-      const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
-      const res = await fetch(`${apiBase}/api/auth/sign-up/email`, {
+      const res = await fetch(`${API_BASE_URL}/api/auth/sign-up/email`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name, email, password })
