@@ -27,7 +27,6 @@
     "dotenv": "^17.2.3",
     "hono": "^4.11.3",
     "jsonwebtoken": "^9.0.3",
-    "ollama": "^0.6.3",
     "pdf-parse": "^2.4.5",
     "prisma": "^5.22.0",
     "typescript": "^5.9.3",
