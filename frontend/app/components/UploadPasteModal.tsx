@@ -86,7 +86,9 @@ export default function UploadPasteModal({ onClose, onUploadSuccess, accessToken
             "Content-Type": "application/json",
             Authorization: `Bearer ${accessToken}`,
           },
-          body: JSON.stringify({ text }),
+          body: JSON.stringify({
+            text,
+          }),
         }
       );
 
