@@ -26,9 +26,9 @@ interface AuditLogEntry {
   id: string;
   action: string;
   entityType: string;
-  entityId: string;
+  entityId: string | null;
   userId: string;
-  user: { name: string; email: string };
+  user: { name: string; email: string } | null;
   changes: Record<string, { before: unknown; after: unknown }> | null;
   ipAddress: string | null;
   userAgent: string | null;
@@ -156,6 +156,15 @@ export default function AuditLogViewer() {
 
   function getActionColor(action: string) {
     return ACTION_COLORS[action] || { bg: "bg-gray-100", text: "text-gray-700" };
+  }
+
+  function formatEntityIdShort(entityId: string | null | undefined): string {
+    if (!entityId) return "N/A";
+    return entityId.slice(0, 8);
+  }
+
+  function formatEntityIdFull(entityId: string | null | undefined): string {
+    return entityId || "N/A";
   }
 
   return (
@@ -297,13 +306,13 @@ export default function AuditLogViewer() {
                           {log.action}
                         </span>
                         <span className="text-xs sm:text-sm text-gray-700 truncate">
-                          {log.entityType} #{log.entityId.slice(0, 8)}
+                          {log.entityType} #{formatEntityIdShort(log.entityId)}
                         </span>
                       </div>
                       <div className="flex flex-wrap items-center gap-2 sm:gap-3 mt-1 text-[10px] sm:text-xs text-gray-500">
                         <span className="flex items-center gap-1">
                           <User className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
-                          <span className="truncate max-w-[80px] sm:max-w-none">{log.user.name || log.user.email}</span>
+                          <span className="truncate max-w-20 sm:max-w-none">{log.user?.name || log.user?.email || "System"}</span>
                         </span>
                         <span className="flex items-center gap-1">
                           <Clock className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
@@ -319,11 +328,11 @@ export default function AuditLogViewer() {
                     <div className="grid grid-cols-2 gap-4 pt-3 text-sm">
                       <div>
                         <p className="text-xs font-medium text-gray-500">Entity ID</p>
-                        <code className="text-xs text-gray-700 font-mono">{log.entityId}</code>
+                        <code className="text-xs text-gray-700 font-mono">{formatEntityIdFull(log.entityId)}</code>
                       </div>
                       <div>
                         <p className="text-xs font-medium text-gray-500">User Email</p>
-                        <p className="text-xs text-gray-700">{log.user.email}</p>
+                        <p className="text-xs text-gray-700">{log.user?.email || "N/A"}</p>
                       </div>
                       {log.ipAddress && (
                         <div>
