@@ -1,7 +1,6 @@
 /**
- * AI-powered transaction extraction using Ollama Cloud API
+ * AI-powered transaction extraction using Groq API
  */
-import { Ollama } from "ollama";
 
 interface ExtractedTransaction {
   date: Date;
@@ -12,128 +11,186 @@ interface ExtractedTransaction {
   confidence: number;
 }
 
-// Ollama Cloud API Configuration
-const OLLAMA_API_KEY = process.env.OLLAMA_API_KEY || "";
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "llama3.2";
+interface ExtractionOptions {
+  singleTransactionMode?: boolean;
+}
 
-// Create Ollama client configured for cloud API
-const ollama = new Ollama({
-  host: "https://ollama.com",
-  headers: {
-    "Authorization": `Bearer ${OLLAMA_API_KEY}`
-  }
-});
+interface RawAITransaction {
+  date: string;
+  description: string;
+  amount: number | string;
+  category?: string | null;
+  counterparty?: string | null;
+  confidence?: number | null;
+}
+
+const GROQ_API_KEY = process.env.GROQ_API_KEY || "";
+const GROQ_MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-20b";
+const GROQ_BASE_URL = "https://api.groq.com/openai/v1/chat/completions";
+
+const STRICT_SCHEMA_MODELS = new Set([
+  "openai/gpt-oss-20b",
+  "openai/gpt-oss-120b"
+]);
 
 /**
- * Extract transactions from text using Ollama Cloud AI
+ * Non-blocking startup validator for Groq configuration.
+ * Logs clear warnings for missing/invalid keys and network issues.
  */
-export async function extractTransactionsWithAI(text: string): Promise<ExtractedTransaction[]> {
-  // Check if API key is configured
-  if (!OLLAMA_API_KEY) {
-    console.log("[AI] No OLLAMA_API_KEY configured, using regex fallback");
-    return extractWithRegex(text);
+export async function validateGroqConfiguration(): Promise<void> {
+  if (!GROQ_API_KEY) {
+    console.warn("[AI] ⚠ GROQ_API_KEY is not set. AI extraction will fall back to regex mode.");
+    return;
   }
-  
+
   try {
-    console.log("[AI] Using Ollama Cloud API for transaction extraction");
-    console.log("[AI] Model:", OLLAMA_MODEL);
-    return await extractWithOllamaCloud(text);
+    const response = await fetch("https://api.groq.com/openai/v1/models", {
+      method: "GET",
+      headers: {
+        "Authorization": `Bearer ${GROQ_API_KEY}`,
+        "Content-Type": "application/json"
+      }
+    });
+
+    if (response.status === 401 || response.status === 403) {
+      console.warn("[AI] ⚠ GROQ_API_KEY appears invalid or unauthorized (401/403). AI extraction will fall back to regex mode.");
+      return;
+    }
+
+    if (!response.ok) {
+      const body = await response.text();
+      console.warn(`[AI] ⚠ Groq validation returned status ${response.status}. Response: ${body.substring(0, 200)}`);
+      return;
+    }
+
+    console.log(`[AI] ✓ Groq API configured successfully. Model: ${GROQ_MODEL}`);
   } catch (error) {
-    console.error("[AI] Ollama Cloud API failed, using regex fallback:", error);
-    return extractWithRegex(text);
+    console.warn("[AI] ⚠ Could not validate Groq API key at startup (network or DNS issue).", error);
   }
 }
 
 /**
- * Extract transactions using Ollama Cloud API (official library)
+ * Extract transactions from text using Groq AI.
+ * Defaults to single-transaction mode because most pasted/receipt payloads are a single bill.
  */
-async function extractWithOllamaCloud(text: string): Promise<ExtractedTransaction[]> {
-  const systemPrompt = `You are a financial transaction parser. Extract transaction data from text and return JSON.
-For each transaction, identify:
-- date: in YYYY-MM-DD format (use today's date if not found)
-- description: the merchant or transaction description  
-- amount: as a number (negative for expenses/debits, positive for income/credits)
-- category: one of: Food, Shopping, Transportation, Entertainment, Bills, Income, Transfer, Other
-- counterparty: the other party if mentioned (optional)
+export async function extractTransactionsWithAI(
+  text: string,
+  options: ExtractionOptions = {}
+): Promise<ExtractedTransaction[]> {
+  const singleTransactionMode = options.singleTransactionMode !== false;
 
-Return a JSON object with a "transactions" array containing the extracted data.`;
-
-  const userPrompt = `Extract all transactions from this text:
-
-${text}
-
-Return JSON: {"transactions": [{"date":"YYYY-MM-DD","description":"...","amount":0,"category":"..."}]}`;
-
-  const response = await ollama.chat({
-    model: OLLAMA_MODEL,
-    messages: [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: userPrompt }
-    ],
-    stream: false,
-    format: "json",
-    options: {
-      temperature: 0.1,  // Lower temperature for more deterministic output
-      num_predict: 2048  // Ensure enough tokens for response
-    }
-  });
-
-  const content = response.message?.content?.trim();
-
-  if (!content) {
-    console.error("[AI] Empty response from Ollama Cloud");
-    throw new Error("Empty response from AI");
+  if (!GROQ_API_KEY) {
+    console.log("[AI] No GROQ_API_KEY configured, using regex fallback");
+    return extractWithRegex(text, { singleTransactionMode });
   }
-
-  console.log("[AI] Ollama Cloud response:", content.substring(0, 300));
-
-  // Parse JSON response - with format: "json", the response should be valid JSON
-  let parsed: Array<{
-    date: string;
-    description: string;
-    amount: number | string;
-    category?: string;
-    counterparty?: string;
-  }>;
   
   try {
-    const jsonResponse = JSON.parse(content);
-    
-    // Handle both array format and object with transactions array
-    if (Array.isArray(jsonResponse)) {
-      parsed = jsonResponse;
-    } else if (jsonResponse.transactions && Array.isArray(jsonResponse.transactions)) {
-      parsed = jsonResponse.transactions;
-    } else {
-      // Try to extract JSON array from content as fallback
-      const jsonMatch = content.match(/\[[\s\S]*\]/);
-      if (!jsonMatch) {
-        console.error("[AI] No JSON array found in response:", content);
-        throw new Error("No valid JSON in response");
+    console.log("[AI] Using Groq API for transaction extraction");
+    console.log("[AI] Model:", GROQ_MODEL);
+    return await extractWithGroq(text, { singleTransactionMode });
+  } catch (error) {
+    console.error("[AI] Groq API failed, using regex fallback:", error);
+    return extractWithRegex(text, { singleTransactionMode });
+  }
+}
+
+/**
+ * Extract transactions using Groq chat completions with structured output.
+ */
+async function extractWithGroq(
+  text: string,
+  options: Required<ExtractionOptions>
+): Promise<ExtractedTransaction[]> {
+  const strict = STRICT_SCHEMA_MODELS.has(GROQ_MODEL);
+
+  const systemPrompt = [
+    "You are a finance transaction extraction engine.",
+    "Extract real banking/payment transactions from noisy OCR and receipts.",
+    options.singleTransactionMode
+      ? "IMPORTANT: The input is expected to represent a single bill/receipt. Return exactly one final transaction for the bill total. Ignore subtotal/tax/item lines unless there is no final total."
+      : "Extract all actual transactions in chronological text.",
+    "Use negative amount for expenses/debits and positive for income/credits.",
+    "Description should be merchant/payee name, not full OCR paragraph.",
+    "Date must be YYYY-MM-DD. If unknown, use today's date.",
+    "Set confidence from 0 to 1 based on extraction certainty."
+  ].join(" ");
+
+  const requestBody: Record<string, unknown> = {
+    model: GROQ_MODEL,
+    temperature: 0.1,
+    n: 1,
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: text }
+    ],
+    response_format: {
+      type: "json_schema",
+      json_schema: {
+        name: "transaction_extraction",
+        strict,
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            transactions: {
+              type: "array",
+              items: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  date: { type: "string" },
+                  description: { type: "string" },
+                  amount: { type: "number" },
+                  category: { type: "string" },
+                  counterparty: { type: ["string", "null"] },
+                  confidence: { type: "number" }
+                },
+                required: ["date", "description", "amount", "category", "counterparty", "confidence"]
+              }
+            }
+          },
+          required: ["transactions"]
+        }
       }
-      parsed = JSON.parse(jsonMatch[0]);
     }
-  } catch (parseError) {
-    // Fallback: try to extract JSON array from content
-    const cleanContent = content.replace(/```json\s*/g, "").replace(/```\s*/g, "");
-    const jsonMatch = cleanContent.match(/\[[\s\S]*\]/);
-    if (!jsonMatch) {
-      console.error("[AI] Failed to parse JSON response:", content);
-      throw new Error("Invalid JSON response from AI");
-    }
-    parsed = JSON.parse(jsonMatch[0]);
+  };
+
+  const response = await fetch(GROQ_BASE_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${GROQ_API_KEY}`
+    },
+    body: JSON.stringify(requestBody)
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Groq API error ${response.status}: ${errorText}`);
   }
 
-  console.log(`[AI] Successfully parsed ${parsed.length} transactions with AI`);
+  const payload = await response.json() as {
+    choices?: Array<{ message?: { content?: string } }>;
+  };
 
-  return parsed.map(tx => ({
-    date: parseDate(tx.date),
-    description: tx.description || "Unknown Transaction",
-    amount: typeof tx.amount === "number" ? tx.amount : parseFloat(String(tx.amount).replace(/[,$]/g, "")) || 0,
-    category: tx.category || "Other",
-    counterparty: tx.counterparty || undefined,
-    confidence: 0.95 // High confidence for AI extraction
-  }));
+  const content = payload.choices?.[0]?.message?.content?.trim();
+  if (!content) {
+    throw new Error("Empty response content from Groq");
+  }
+
+  console.log("[AI] Groq response snippet:", content.substring(0, 300));
+
+  const parsedRoot = JSON.parse(content) as { transactions?: RawAITransaction[] } | RawAITransaction[];
+  const rawTransactions = Array.isArray(parsedRoot)
+    ? parsedRoot
+    : Array.isArray(parsedRoot.transactions)
+      ? parsedRoot.transactions
+      : [];
+
+  const cleaned = sanitizeTransactions(rawTransactions, text, options);
+  console.log(`[AI] Final transactions after sanitization: ${cleaned.length}`);
+
+  return cleaned;
 }
 
 /**
@@ -160,11 +217,14 @@ function parseDate(dateStr: string): Date {
  * 1. Structured format (Date:, Description:, Amount: on separate lines)
  * 2. Tabular format (date, description, amount on same line)
  */
-export function extractWithRegex(text: string): ExtractedTransaction[] {
+export function extractWithRegex(text: string, options: ExtractionOptions = {}): ExtractedTransaction[] {
+  const singleTransactionMode = options.singleTransactionMode !== false;
+
   // First, check if this is a structured format with labels
   if (isStructuredFormat(text)) {
     console.log("[Regex] Detected structured format (Date:, Description:, Amount:)");
-    return extractFromStructuredFormat(text);
+    const parsed = extractFromStructuredFormat(text);
+    return singleTransactionMode ? keepBestSingleTransaction(parsed, text) : parsed;
   }
 
   // Otherwise, parse line by line for tabular format
@@ -172,6 +232,10 @@ export function extractWithRegex(text: string): ExtractedTransaction[] {
   const transactions: ExtractedTransaction[] = [];
 
   for (const line of lines) {
+    if (isLikelyNonTransactionLine(line)) {
+      continue;
+    }
+
     // Skip header lines
     if (line.toLowerCase().includes("date") && line.toLowerCase().includes("description")) {
       continue;
@@ -184,7 +248,7 @@ export function extractWithRegex(text: string): ExtractedTransaction[] {
     }
   }
 
-  return transactions;
+  return singleTransactionMode ? keepBestSingleTransaction(transactions, text) : transactions;
 }
 
 /**
@@ -272,6 +336,7 @@ function parseStructuredBlock(block: string): ExtractedTransaction | null {
   let date: Date = new Date();
   let description = "";
   let amount = 0;
+  let hasAmount = false;
   let balance: number | undefined;
   
   const lines = block.split('\n');
@@ -302,6 +367,7 @@ function parseStructuredBlock(block: string): ExtractedTransaction | null {
     if (amountMatch) {
       const amtStr = amountMatch[1].replace(/[,\s]/g, '');
       amount = parseFloat(amtStr) || 0;
+      hasAmount = true;
       continue;
     }
     
@@ -314,15 +380,10 @@ function parseStructuredBlock(block: string): ExtractedTransaction | null {
     }
   }
   
-  // Must have at least a description or amount
-  if (!description && amount === 0) {
+  // Must have a valid amount and meaningful description
+  if (!hasAmount || amount === 0 || !description) {
     console.log("[Regex] Block rejected - no description or amount:", block.substring(0, 50));
     return null;
-  }
-  
-  // Use a default description if missing
-  if (!description) {
-    description = "Transaction";
   }
   
   const category = categorizeByDescription(description);
@@ -413,6 +474,7 @@ function parseTransactionLine(line: string): ExtractedTransaction | null {
 
   let date: Date | null = null;
   let amount = 0;
+  let hasAmount = false;
   let description = line;
 
   // Extract date
@@ -438,8 +500,9 @@ function parseTransactionLine(line: string): ExtractedTransaction | null {
       let amountStr = match[1] || match[2] || "";
       amountStr = amountStr.replace(/[$,\s]/g, "");
       const parsedAmount = parseFloat(amountStr);
-      if (!isNaN(parsedAmount)) {
+      if (!isNaN(parsedAmount) && Math.abs(parsedAmount) > 0) {
         amount = parsedAmount;
+        hasAmount = true;
         // Check for sign
         if (match[0].includes("-") || line.includes("-" + Math.abs(amount))) {
           amount = -Math.abs(amount);
@@ -462,6 +525,11 @@ function parseTransactionLine(line: string): ExtractedTransaction | null {
 
   // Skip if no meaningful description
   if (!description || description.length < 2) {
+    return null;
+  }
+
+  // Must include a valid, non-zero amount to be considered a transaction.
+  if (!hasAmount) {
     return null;
   }
 
@@ -506,6 +574,102 @@ function categorizeByDescription(description: string): string {
  * Extract single transaction (for backward compatibility)
  */
 export function extractSingleTransaction(text: string): ExtractedTransaction | null {
-  const transactions = extractWithRegex(text);
+  const transactions = extractWithRegex(text, { singleTransactionMode: true });
   return transactions.length > 0 ? transactions[0] : null;
+}
+
+function sanitizeTransactions(
+  rawTransactions: RawAITransaction[],
+  sourceText: string,
+  options: Required<ExtractionOptions>
+): ExtractedTransaction[] {
+  const seen = new Set<string>();
+  const cleaned: ExtractedTransaction[] = [];
+
+  for (const tx of rawTransactions) {
+    const description = normalizeDescription(tx.description || "");
+    const amount = toAmount(tx.amount);
+
+    if (!description || Math.abs(amount) < 0.0001) {
+      continue;
+    }
+
+    if (isLikelyNonTransactionLine(description)) {
+      continue;
+    }
+
+    const parsed: ExtractedTransaction = {
+      date: parseDate(tx.date),
+      description,
+      amount,
+      category: tx.category || "Other",
+      counterparty: tx.counterparty || undefined,
+      confidence: clampConfidence(typeof tx.confidence === "number" ? tx.confidence : 0.85)
+    };
+
+    const key = `${parsed.date.toISOString().slice(0, 10)}|${parsed.amount.toFixed(2)}|${parsed.description.toLowerCase()}`;
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    cleaned.push(parsed);
+  }
+
+  if (!options.singleTransactionMode) {
+    return cleaned;
+  }
+
+  return keepBestSingleTransaction(cleaned, sourceText);
+}
+
+function keepBestSingleTransaction(transactions: ExtractedTransaction[], sourceText: string): ExtractedTransaction[] {
+  if (transactions.length <= 1) {
+    return transactions;
+  }
+
+  const lowerSource = sourceText.toLowerCase();
+  const receiptLike = /(invoice|receipt|bill|total|subtotal|tax|gst|amount paid)/i.test(lowerSource);
+
+  const sorted = [...transactions].sort((a, b) => scoreTransaction(b, receiptLike) - scoreTransaction(a, receiptLike));
+  return [sorted[0]];
+}
+
+function scoreTransaction(tx: ExtractedTransaction, receiptLike: boolean): number {
+  const base = Math.abs(tx.amount);
+  const confidenceScore = tx.confidence * 100;
+  const descPenalty = /(tax|gst|cgst|sgst|subtotal|tip|discount|fee|balance)/i.test(tx.description) ? -40 : 0;
+  const receiptBoost = receiptLike ? Math.abs(tx.amount) * 0.25 : 0;
+  return base + confidenceScore + descPenalty + receiptBoost;
+}
+
+function toAmount(value: number | string): number {
+  if (typeof value === "number") return value;
+  const parsed = parseFloat(String(value).replace(/[,$\s]/g, ""));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function normalizeDescription(value: string): string {
+  return value.replace(/\s+/g, " ").replace(/^[,;:\-\s]+|[,;:\-\s]+$/g, "").trim();
+}
+
+function clampConfidence(value: number): number {
+  if (!Number.isFinite(value)) return 0.5;
+  return Math.max(0, Math.min(1, value));
+}
+
+function isLikelyNonTransactionLine(line: string): boolean {
+  const lower = line.toLowerCase();
+  const patterns = [
+    /opening\s+balance/,
+    /closing\s+balance/,
+    /available\s+balance/,
+    /balance\s+after\s+transaction/,
+    /^balance\b/,
+    /^statement\b/,
+    /^account\s+number\b/,
+    /^ifsc\b/,
+    /^branch\b/
+  ];
+  return patterns.some((pattern) => pattern.test(lower));
 }
