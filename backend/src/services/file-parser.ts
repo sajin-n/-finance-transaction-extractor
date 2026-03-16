@@ -244,6 +244,8 @@ function parseText(text: string): ParsedTransaction[] {
   
   // Check for common bank statement patterns
   for (const line of lines) {
+    if (isLikelyNonTransactionLine(line)) continue;
+
     // Skip header lines
     if (isHeaderLine(line)) continue;
     
@@ -253,6 +255,11 @@ function parseText(text: string): ParsedTransaction[] {
     }
   }
   
+  if (shouldCollapseToSingleBillTransaction(text, transactions)) {
+    const best = pickBestBillTransaction(transactions);
+    return best ? [{ ...best, confidence: Math.max(best.confidence, 0.85) }] : [];
+  }
+
   return transactions;
 }
 
@@ -312,6 +319,7 @@ function parseStructuredBlock(block: string): ParsedTransaction | null {
   let date = new Date();
   let description = "";
   let amount = 0;
+  let hasAmount = false;
   let balance: number | undefined;
   
   for (const line of block.split("\n")) {
@@ -334,6 +342,7 @@ function parseStructuredBlock(block: string): ParsedTransaction | null {
     const amountMatch = trimmed.match(/^amount\s*:\s*([+-]?\s*[\d,.]+)$/i);
     if (amountMatch) {
       amount = tryParseAmount(amountMatch[1]) || 0;
+      hasAmount = true;
       continue;
     }
     
@@ -343,8 +352,7 @@ function parseStructuredBlock(block: string): ParsedTransaction | null {
     }
   }
   
-  if (!description && amount === 0) return null;
-  if (!description) description = "Transaction";
+  if (!description || !hasAmount || amount === 0) return null;
   
   return {
     date,
@@ -378,6 +386,7 @@ function isHeaderLine(line: string): boolean {
 function parseTransactionLine(line: string): ParsedTransaction | null {
   let date: Date | null = null;
   let amount = 0;
+  let hasAmount = false;
   let description = line;
   
   // Extract date
@@ -413,6 +422,7 @@ function parseTransactionLine(line: string): ParsedTransaction | null {
       const parsed = tryParseAmount(match[1]);
       if (parsed !== null && Math.abs(parsed) > 0) {
         amount = parsed;
+        hasAmount = true;
         // Check for debit/credit indicators
         if (/DR|DEBIT|WITHDRAWAL/i.test(line)) {
           amount = -Math.abs(amount);
@@ -432,6 +442,7 @@ function parseTransactionLine(line: string): ParsedTransaction | null {
     .trim();
   
   if (!description || description.length < 2) return null;
+  if (!hasAmount) return null;
   if (!date) date = new Date();
   
   return {
@@ -539,4 +550,55 @@ function categorizeByDescription(description: string): string {
   }
   
   return "Other";
+}
+
+function isLikelyNonTransactionLine(line: string): boolean {
+  const lower = line.toLowerCase();
+  const patterns = [
+    /opening\s+balance/,
+    /closing\s+balance/,
+    /available\s+balance/,
+    /balance\s+after\s+transaction/,
+    /^balance\b/,
+    /^account\s+number\b/,
+    /^ifsc\b/,
+    /^branch\b/,
+    /^statement\b/
+  ];
+  return patterns.some(p => p.test(lower));
+}
+
+function shouldCollapseToSingleBillTransaction(text: string, transactions: ParsedTransaction[]): boolean {
+  if (transactions.length <= 1 || transactions.length > 6) {
+    return false;
+  }
+
+  const lower = text.toLowerCase();
+  const receiptHints = /(invoice|receipt|bill\b|tax\b|gst\b|subtotal|amount paid|total amount)/i;
+  const statementHints = /(statement period|transaction history|opening balance|closing balance)/i;
+
+  if (statementHints.test(lower)) {
+    return false;
+  }
+
+  if (receiptHints.test(lower)) {
+    return true;
+  }
+
+  const uniqueDates = new Set(transactions.map(t => t.date.toISOString().slice(0, 10))).size;
+  return uniqueDates <= 1 && transactions.length <= 3;
+}
+
+function pickBestBillTransaction(transactions: ParsedTransaction[]): ParsedTransaction | null {
+  if (transactions.length === 0) return null;
+
+  const sorted = [...transactions].sort((a, b) => scoreBillTransaction(b) - scoreBillTransaction(a));
+  return sorted[0] || null;
+}
+
+function scoreBillTransaction(tx: ParsedTransaction): number {
+  const amountScore = Math.abs(tx.amount);
+  const confidenceScore = tx.confidence * 100;
+  const descPenalty = /(tax|gst|cgst|sgst|subtotal|tip|discount|fee|balance)/i.test(tx.description) ? -40 : 0;
+  return amountScore + confidenceScore + descPenalty;
 }
